@@ -1,10 +1,12 @@
-```python
+
 import os
 import joblib
 import numpy as np
 
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import mutual_info_classif
+
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -19,53 +21,63 @@ from qiskit_machine_learning.algorithms import QSVC
 
 
 # ============================================================
-# FILE PATHS
+# 1. FILE PATHS
 # ============================================================
 
-DATA_X_PATH = "data/X.npy"
-DATA_Y_PATH = "data/y.npy"
+MODEL_DIR = "model"
 
-MODEL_DIR = "models"
-MODEL_PATH = os.path.join(MODEL_DIR, "qsvc_model.pkl")
-SCALER_PATH = os.path.join(MODEL_DIR, "qsvc_scaler.pkl")
-CONFIG_PATH = os.path.join(MODEL_DIR, "qsvc_config.pkl")
+MODEL_PATH = os.path.join(
+    MODEL_DIR, "qsvc_model.pkl"
+)
 
+SCALER_PATH = os.path.join(
+    MODEL_DIR, "scaler.pkl"
+)
 
-# ============================================================
-# LOAD DATA
-# ============================================================
+SELECTED_FEATURES_PATH = os.path.join(
+    MODEL_DIR, "selected_features.pkl"
+)
 
-def load_dataset():
-    X = np.load(DATA_X_PATH)
-    y = np.load(DATA_Y_PATH)
+MI_SCORES_PATH = os.path.join(
+    MODEL_DIR, "mi_scores.pkl"
+)
 
-    print("Dataset loaded successfully!")
-    print("X shape:", X.shape)
-    print("y shape:", y.shape)
-    print("Number of features:", X.shape[1])
-
-    return X, y
+CONFIG_PATH = os.path.join(
+    MODEL_DIR, "config.pkl"
+)
 
 
 # ============================================================
-# CHECK WHETHER A TRAINED MODEL EXISTS
+# 2. CHECK WHETHER ALL FIVE PICKLE FILES EXIST
 # ============================================================
 
 def model_exists():
-    return (
-        os.path.isfile(MODEL_PATH)
-        and os.path.isfile(SCALER_PATH)
-        and os.path.isfile(CONFIG_PATH)
+
+    required_files = [
+        MODEL_PATH,
+        SCALER_PATH,
+        SELECTED_FEATURES_PATH,
+        MI_SCORES_PATH,
+        CONFIG_PATH
+    ]
+
+    return all(
+        os.path.isfile(path)
+        for path in required_files
     )
 
 
 # ============================================================
-# CREATE QUANTUM MODEL
+# 3. CREATE QUANTUM KERNEL
 # ============================================================
 
-def create_quantum_model(reps, C, feature_dimension):
+def create_quantum_kernel(
+    number_of_features,
+    reps=2
+):
+
     feature_map = zz_feature_map(
-        feature_dimension=feature_dimension,
+        feature_dimension=number_of_features,
         reps=reps
     )
 
@@ -73,366 +85,507 @@ def create_quantum_model(reps, C, feature_dimension):
         feature_map=feature_map
     )
 
-    model = QSVC(
-        quantum_kernel=quantum_kernel,
-        C=C
-    )
-
-    return model
+    return quantum_kernel
 
 
 # ============================================================
-# EVALUATE CONFIGURATION USING STRATIFIED CROSS-VALIDATION
-# ============================================================
-
-def evaluate_configuration(X_train, y_train, reps, C):
-
-    _, class_counts = np.unique(
-        y_train,
-        return_counts=True
-    )
-
-    min_class_count = np.min(class_counts)
-    n_splits = min(3, min_class_count)
-
-    if n_splits < 2:
-        raise ValueError(
-            "Each class needs at least 2 training samples "
-            "for stratified cross-validation."
-        )
-
-    skf = StratifiedKFold(
-        n_splits=n_splits,
-        shuffle=True,
-        random_state=42
-    )
-
-    accuracy_scores = []
-    precision_scores = []
-    recall_scores = []
-    f1_scores = []
-
-    for fold, (train_index, val_index) in enumerate(
-        skf.split(X_train, y_train), start=1
-    ):
-
-        print(f"    Cross-validation fold {fold}/{n_splits}")
-
-        X_fold_train = X_train[train_index]
-        X_fold_val = X_train[val_index]
-
-        y_fold_train = y_train[train_index]
-        y_fold_val = y_train[val_index]
-
-        scaler = StandardScaler()
-
-        X_fold_train_scaled = scaler.fit_transform(
-            X_fold_train
-        )
-
-        X_fold_val_scaled = scaler.transform(
-            X_fold_val
-        )
-
-        model = create_quantum_model(
-            reps=reps,
-            C=C,
-            feature_dimension=X_train.shape[1]
-        )
-
-        model.fit(
-            X_fold_train_scaled,
-            y_fold_train
-        )
-
-        predictions = model.predict(
-            X_fold_val_scaled
-        )
-
-        accuracy_scores.append(
-            accuracy_score(y_fold_val, predictions)
-        )
-
-        precision_scores.append(
-            precision_score(
-                y_fold_val,
-                predictions,
-                zero_division=0
-            )
-        )
-
-        recall_scores.append(
-            recall_score(
-                y_fold_val,
-                predictions,
-                zero_division=0
-            )
-        )
-
-        f1_scores.append(
-            f1_score(
-                y_fold_val,
-                predictions,
-                zero_division=0
-            )
-        )
-
-    return {
-        "accuracy": np.mean(accuracy_scores),
-        "precision": np.mean(precision_scores),
-        "recall": np.mean(recall_scores),
-        "f1": np.mean(f1_scores)
-    }
-
-
-# ============================================================
-# FIND BEST QUANTUM CONFIGURATION
-# ============================================================
-
-def find_best_configuration(X_train, y_train):
-
-    reps_values = [1]
-    C_values = [0.1, 1]
-
-    best_configuration = None
-    best_f1 = -1
-
-    print("\n")
-    print("SEARCHING FOR BEST QUANTUM CONFIGURATION")
-    print("Feature-map reps:", reps_values)
-    print("QSVC C values   :", C_values)
-
-    for reps in reps_values:
-        for C in C_values:
-
-            print(
-                f"\nTesting ZZFeatureMap reps={reps}, "
-                f"QSVC C={C}"
-            )
-
-            scores = evaluate_configuration(
-                X_train,
-                y_train,
-                reps,
-                C
-            )
-
-            print(f"  Accuracy : {scores['accuracy']:.4f}")
-            print(f"  Precision: {scores['precision']:.4f}")
-            print(f"  Recall   : {scores['recall']:.4f}")
-            print(f"  F1       : {scores['f1']:.4f}")
-
-            if scores["f1"] > best_f1:
-                best_f1 = scores["f1"]
-
-                best_configuration = {
-                    "reps": reps,
-                    "C": C,
-                    "accuracy": scores["accuracy"],
-                    "precision": scores["precision"],
-                    "recall": scores["recall"],
-                    "f1": scores["f1"]
-                }
-
-    print("\n" + "=" * 65)
-    print("BEST CONFIGURATION")
-    print("=" * 65)
-    print(f"ZZFeatureMap reps : {best_configuration['reps']}")
-    print(f"QSVC C            : {best_configuration['C']}")
-    print(f"CV Accuracy       : {best_configuration['accuracy']:.4f}")
-    print(f"CV Precision      : {best_configuration['precision']:.4f}")
-    print(f"CV Recall         : {best_configuration['recall']:.4f}")
-    print(f"CV F1             : {best_configuration['f1']:.4f}")
-    print("=" * 65)
-
-    return best_configuration
-
-
-# ============================================================
-# TRAIN AND SAVE MODEL
+# 4. TRAIN MODEL AND SAVE ALL FIVE PICKLE FILES
 # ============================================================
 
 def train_model():
 
-    X, y = load_dataset()
+    # Load data only when training is required
+    X = np.load("data/X.npy")
+    y = np.load("data/y.npy")
 
-    print("\n")
-    print("=" * 65)
-    print("QUANTUMINSPECT MODEL TRAINING")
-    print("=" * 65)
+    print("\n===================================")
+    print("       QUANTUMINSPECT TRAINING")
+    print("===================================")
+
+    print("X shape:", X.shape)
+    print("y shape:", y.shape)
+
+    print("\nClass distribution:")
+    print(np.unique(y, return_counts=True))
+
+    # --------------------------------------------------------
+    # DATA SPLIT
+    # --------------------------------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
-        test_size=0.20,
+        test_size=0.30,
         random_state=42,
         stratify=y
     )
 
-    print("\nDataset:")
-    print("Total samples :", len(X))
-    print("Training      :", len(X_train))
-    print("Final testing :", len(X_test))
+    print("\nTraining samples:", len(X_train))
+    print("Testing samples :", len(X_test))
 
-    best = find_best_configuration(
+    # --------------------------------------------------------
+    # MUTUAL INFORMATION FEATURE SELECTION
+    # --------------------------------------------------------
+
+    print("\n===================================")
+    print("       MUTUAL INFORMATION")
+    print("===================================")
+
+    # Calculate MI using training data only
+    mi_scores = mutual_info_classif(
         X_train,
-        y_train
+        y_train,
+        random_state=42
     )
 
-    best_reps = best["reps"]
-    best_C = best["C"]
+    for i, score in enumerate(mi_scores):
+        print(
+            f"Feature {i + 1}: {score:.4f}"
+        )
+
+    candidate_count = min(
+        6,
+        X_train.shape[1]
+    )
+
+    candidate_features = np.argsort(
+        mi_scores
+    )[-candidate_count:]
+
+    candidate_features = np.sort(
+        candidate_features
+    )
+
+    print("\nCandidate features:")
+    print(candidate_features + 1)
+
+    # --------------------------------------------------------
+    # CONFIGURATION SEARCH
+    # --------------------------------------------------------
+
+    print("\n===================================")
+    print("     SEARCHING FEATURE SUBSETS")
+    print("===================================")
+
+    feature_sizes = [2, 3, 4]
+    C_values = [0.1, 1.0, 10.0]
+
+    cv = StratifiedKFold(
+        n_splits=3,
+        shuffle=True,
+        random_state=42
+    )
+
+    best_score = -1
+    best_features = None
+    best_C = None
+    best_reps = None
+
+    for number_of_features in feature_sizes:
+
+        if number_of_features > len(candidate_features):
+            continue
+
+        # Highest MI-ranked features
+        selected_features = candidate_features[
+            -number_of_features:
+        ]
+
+        print(
+            f"\nTesting {number_of_features} features:"
+        )
+
+        print(
+            "Features:",
+            selected_features + 1
+        )
+
+        X_train_subset = X_train[
+            :,
+            selected_features
+        ]
+
+        for reps in [1, 2]:
+
+            print(
+                f"  Feature-map reps = {reps}"
+            )
+
+            quantum_kernel = create_quantum_kernel(
+                number_of_features,
+                reps
+            )
+
+            for C in C_values:
+
+                print(
+                    f"    Testing C = {C}"
+                )
+
+                fold_scores = []
+
+                # --------------------------------------------
+                # STRATIFIED CROSS-VALIDATION
+                # --------------------------------------------
+
+                for fold, (train_idx, val_idx) in enumerate(
+                    cv.split(X_train_subset, y_train),
+                    start=1
+                ):
+
+                    print(
+                        f"      Fold {fold}/3"
+                    )
+
+                    X_fold_train = X_train_subset[
+                        train_idx
+                    ]
+
+                    X_fold_val = X_train_subset[
+                        val_idx
+                    ]
+
+                    y_fold_train = y_train[
+                        train_idx
+                    ]
+
+                    y_fold_val = y_train[
+                        val_idx
+                    ]
+
+                    # Fit scaler only on fold training data
+                    scaler_fold = StandardScaler()
+
+                    X_fold_train_scaled = (
+                        scaler_fold.fit_transform(
+                            X_fold_train
+                        )
+                    )
+
+                    X_fold_val_scaled = (
+                        scaler_fold.transform(
+                            X_fold_val
+                        )
+                    )
+
+                    model = QSVC(
+                        quantum_kernel=quantum_kernel,
+                        C=C
+                    )
+
+                    model.fit(
+                        X_fold_train_scaled,
+                        y_fold_train
+                    )
+
+                    predictions = model.predict(
+                        X_fold_val_scaled
+                    )
+
+                    score = accuracy_score(
+                        y_fold_val,
+                        predictions
+                    )
+
+                    fold_scores.append(score)
+
+                mean_score = np.mean(
+                    fold_scores
+                )
+
+                print(
+                    f"      CV Accuracy = {mean_score:.4f}"
+                )
+
+                # --------------------------------------------
+                # RECORD BEST CONFIGURATION
+                # --------------------------------------------
+
+                if mean_score > best_score:
+
+                    best_score = mean_score
+
+                    best_features = (
+                        selected_features.copy()
+                    )
+
+                    best_C = C
+                    best_reps = reps
+
+    if best_features is None:
+        raise ValueError(
+            "Unable to select features. "
+            "Check the number of input features."
+        )
+
+    # --------------------------------------------------------
+    # DISPLAY BEST CONFIGURATION
+    # --------------------------------------------------------
+
+    print("\n===================================")
+    print("       BEST CONFIGURATION")
+    print("===================================")
+
+    print(
+        "Best CV Accuracy:",
+        f"{best_score:.4f}"
+    )
+
+    print(
+        "Best features:",
+        best_features + 1
+    )
+
+    print("Best C:", best_C)
+    print("Best reps:", best_reps)
+
+    # --------------------------------------------------------
+    # FINAL TRAINING
+    # --------------------------------------------------------
+
+    print("\n===================================")
+    print("        FINAL TRAINING")
+    print("===================================")
+
+    X_train_final = X_train[
+        :,
+        best_features
+    ]
+
+    X_test_final = X_test[
+        :,
+        best_features
+    ]
 
     scaler = StandardScaler()
 
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-
-    print("\nTraining final quantum model...")
-
-    final_model = create_quantum_model(
-        reps=best_reps,
-        C=best_C,
-        feature_dimension=X.shape[1]
+    X_train_scaled = scaler.fit_transform(
+        X_train_final
     )
+
+    X_test_scaled = scaler.transform(
+        X_test_final
+    )
+
+    final_feature_map = zz_feature_map(
+        feature_dimension=len(best_features),
+        reps=best_reps
+    )
+
+    final_quantum_kernel = FidelityQuantumKernel(
+        feature_map=final_feature_map
+    )
+
+    final_model = QSVC(
+        quantum_kernel=final_quantum_kernel,
+        C=best_C
+    )
+
+    print("\nTraining final QSVC...")
 
     final_model.fit(
         X_train_scaled,
         y_train
     )
 
-    test_predictions = final_model.predict(
+    print("Final QSVC training completed!")
+
+    # --------------------------------------------------------
+    # FINAL TEST
+    # --------------------------------------------------------
+
+    predictions = final_model.predict(
         X_test_scaled
     )
 
-    accuracy = accuracy_score(y_test, test_predictions)
+    # --------------------------------------------------------
+    # METRICS
+    # --------------------------------------------------------
+
+    accuracy = accuracy_score(
+        y_test,
+        predictions
+    )
 
     precision = precision_score(
         y_test,
-        test_predictions,
+        predictions,
         zero_division=0
     )
 
     recall = recall_score(
         y_test,
-        test_predictions,
+        predictions,
         zero_division=0
     )
 
     f1 = f1_score(
         y_test,
-        test_predictions,
+        predictions,
         zero_division=0
     )
 
     confusion = confusion_matrix(
         y_test,
-        test_predictions
+        predictions
     )
 
-    print("\n")
-    print("=" * 65)
-    print("FINAL TEST RESULTS")
-    print("=" * 65)
-    print(f"Best reps      : {best_reps}")
-    print(f"Best C         : {best_C}")
-    print(f"Accuracy       : {accuracy:.4f}")
-    print(f"Precision      : {precision:.4f}")
-    print(f"Recall         : {recall:.4f}")
-    print(f"F1 Score       : {f1:.4f}")
+    print("\n===================================")
+    print("       FINAL MODEL PERFORMANCE")
+    print("===================================")
+
+    print(f"Accuracy  : {accuracy:.4f}")
+    print(f"Precision : {precision:.4f}")
+    print(f"Recall    : {recall:.4f}")
+    print(f"F1 Score  : {f1:.4f}")
+
     print("\nConfusion Matrix:")
     print(confusion)
-    print("=" * 65)
 
-    os.makedirs(MODEL_DIR, exist_ok=True)
+    # --------------------------------------------------------
+    # SAVE ALL FIVE PICKLE FILES
+    # --------------------------------------------------------
 
-    # Save the trained model
-    joblib.dump(final_model, MODEL_PATH)
+    os.makedirs(
+        MODEL_DIR,
+        exist_ok=True
+    )
 
-    # Save the fitted scaler
-    joblib.dump(scaler, SCALER_PATH)
+    joblib.dump(
+        final_model,
+        MODEL_PATH
+    )
 
-    # Save configuration and evaluation metrics
+    joblib.dump(
+        scaler,
+        SCALER_PATH
+    )
+
+    joblib.dump(
+        best_features,
+        SELECTED_FEATURES_PATH
+    )
+
+    joblib.dump(
+        mi_scores,
+        MI_SCORES_PATH
+    )
+
     joblib.dump(
         {
-            "reps": best_reps,
             "C": best_C,
-            "feature_dimension": X.shape[1],
-            "cv_accuracy": best["accuracy"],
-            "cv_precision": best["precision"],
-            "cv_recall": best["recall"],
-            "cv_f1": best["f1"],
+            "reps": best_reps,
+            "cv_accuracy": best_score,
             "test_accuracy": accuracy,
             "test_precision": precision,
             "test_recall": recall,
-            "test_f1": f1
+            "test_f1": f1,
+            "number_of_selected_features": len(
+                best_features
+            ),
+            "original_feature_count": X.shape[1]
         },
         CONFIG_PATH
     )
 
-    print("\nModel saved successfully!")
+    print("\n===================================")
+    print("          MODEL SAVED")
+    print("===================================")
+
     print(MODEL_PATH)
     print(SCALER_PATH)
+    print(SELECTED_FEATURES_PATH)
+    print(MI_SCORES_PATH)
     print(CONFIG_PATH)
 
-    return final_model, scaler
+    print("\nTraining completed successfully!")
 
 
 # ============================================================
-# LOAD PREVIOUSLY TRAINED MODEL
+# 5. LOAD PREVIOUSLY TRAINED MODEL
 # ============================================================
 
 def load_model():
 
     if not model_exists():
         raise FileNotFoundError(
-            "A complete trained model was not found. "
-            "Train the model first."
+            "One or more model files are missing."
         )
 
-    model = joblib.load(MODEL_PATH)
-    scaler = joblib.load(SCALER_PATH)
-    config = joblib.load(CONFIG_PATH)
+    model = joblib.load(
+        MODEL_PATH
+    )
 
-    print("Previously trained model loaded successfully!")
-    print("Training will be skipped.")
+    scaler = joblib.load(
+        SCALER_PATH
+    )
+
+    selected_features = joblib.load(
+        SELECTED_FEATURES_PATH
+    )
+
+    # Load these files to verify they are available
+    mi_scores = joblib.load(
+        MI_SCORES_PATH
+    )
+
+    config = joblib.load(
+        CONFIG_PATH
+    )
+
+    print("\nSaved model loaded successfully!")
+    print("Training skipped.")
+    print("Selected features:", selected_features + 1)
     print("Saved configuration:", config)
 
-    return model, scaler
+    return (
+        model,
+        scaler,
+        selected_features
+    )
 
 
 # ============================================================
-# GET MODEL: LOAD IF AVAILABLE, OTHERWISE TRAIN
+# 6. LOAD MODEL OR TRAIN IF NECESSARY
 # ============================================================
 
 def get_model():
 
     if model_exists():
-        print("\nSaved model found. Loading without retraining...")
+
+        print("\nExisting trained model found.")
+        print("Loading saved files without retraining.")
+
         return load_model()
 
-    print("\nNo complete saved model found.")
-    print("Training the model for the first time...")
+    print("\nTrained model files not found or incomplete.")
+    print("Training the model now...")
 
-    return train_model()
+    train_model()
+
+    # Load the newly saved model
+    return load_model()
 
 
 # ============================================================
-# PREDICT GOOD OR DEFECTIVE
+# 7. PREDICT A NEW SAMPLE WITHOUT RETRAINING
 # ============================================================
 
 def predict(features):
 
-    # Loads the saved model; trains only if model files are missing.
-    model, scaler = get_model()
+    model, scaler, selected_features = get_model()
 
-    features = np.asarray(features, dtype=float)
+    features = np.asarray(
+        features,
+        dtype=float
+    )
 
     if features.ndim == 1:
         features = features.reshape(1, -1)
 
     if features.ndim != 2:
         raise ValueError(
-            "Features must be a 1D or 2D numeric array."
+            "Features must be a 1D or 2D array."
         )
 
     if not np.isfinite(features).all():
@@ -440,18 +593,28 @@ def predict(features):
             "Features contain NaN or infinite values."
         )
 
-    expected_features = scaler.n_features_in_
-
-    if features.shape[1] != expected_features:
+    if features.shape[1] <= np.max(selected_features):
         raise ValueError(
-            f"Expected {expected_features} features, "
-            f"but received {features.shape[1]}."
+            "Input has fewer features than required "
+            "by the saved feature selector."
         )
 
-    features_scaled = scaler.transform(features)
-    prediction = model.predict(features_scaled)
+    # Select exactly the features used during training
+    features_selected = features[
+        :,
+        selected_features
+    ]
 
-    # Preserves your original label mapping.
+    # Reuse the saved scaler
+    features_scaled = scaler.transform(
+        features_selected
+    )
+
+    # Predict using the saved model
+    prediction = model.predict(
+        features_scaled
+    )
+
     if prediction[0] == 0:
         return "GOOD"
 
@@ -459,13 +622,30 @@ def predict(features):
 
 
 # ============================================================
-# MAIN
+# 8. MAIN
 # ============================================================
 
 if __name__ == "__main__":
 
-    # Running this file:
-    # 1. Loads existing model files, if all are present.
-    # 2. Otherwise, trains and saves the model.
-    get_model()
-```
+    if model_exists():
+
+        print("\n===================================")
+        print("      EXISTING MODEL DETECTED")
+        print("===================================")
+
+        print("Loading model...")
+        get_model()
+
+        print("\nReady for predictions.")
+        print("No retraining performed.")
+
+    else:
+
+        print("\n===================================")
+        print("       FIRST-TIME TRAINING")
+        print("===================================")
+
+        get_model()
+
+        print("\nAll five pickle files are saved.")
+        print("The model is ready for future predictions.")
