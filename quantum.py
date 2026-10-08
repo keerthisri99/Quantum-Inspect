@@ -28,25 +28,12 @@ from qiskit_machine_learning.algorithms import QSVC
 # 0 = GOOD
 # 1 = DEFECTIVE
 
-X = np.array([
-    [0.20, 0.10, 0.15, 0.18],
-    [0.25, 0.12, 0.18, 0.20],
-    [0.22, 0.11, 0.16, 0.19],
-    [0.28, 0.14, 0.20, 0.23],
-    [0.24, 0.13, 0.17, 0.21],
+X = np.load("data/X.npy")
+y = np.load("data/y.npy")
 
-    [0.75, 0.40, 0.65, 0.70],
-    [0.82, 0.45, 0.72, 0.78],
-    [0.78, 0.42, 0.68, 0.74],
-    [0.85, 0.48, 0.75, 0.82],
-    [0.80, 0.44, 0.70, 0.76]
-])
-
-y = np.array([
-    0, 0, 0, 0, 0,
-    1, 1, 1, 1, 1
-])
-
+print("Quantum_hack dataset loaded!")
+print("X shape:", X.shape)
+print("y shape:", y.shape)
 
 def create_quantum_model(reps, C):
     """
@@ -412,59 +399,50 @@ def train_model():
 
     print("=" * 65)
 
-    os.makedirs(
-        "model",
-        exist_ok=True
-    )
+   os.makedirs(
+    "models",
+    exist_ok=True
+)
 
 
-    joblib.dump(
-        final_model,
-        "model/qsvc_model.pkl"
-    )
+joblib.dump(
+    final_model,
+    "models/qsvc_model.pkl"
+)
 
-    joblib.dump(
-        scaler,
-        "model/scaler.pkl"
-    )
-
+joblib.dump(
+    scaler,
+    "models/qsvc_scaler.pkl"
+)
 
     # Save configuration too
-    joblib.dump(
-        {
-            "reps": best_reps,
-            "C": best_C,
-            "cv_accuracy": best["accuracy"],
-            "cv_precision": best["precision"],
-            "cv_recall": best["recall"],
-            "cv_f1": best["f1"]
-        },
-        "model/config.pkl"
-    )
+joblib.dump(
+    {
+        "reps": best_reps,
+        "C": best_C,
+        "cv_accuracy": best["accuracy"],
+        "cv_precision": best["precision"],
+        "cv_recall": best["recall"],
+        "cv_f1": best["f1"]
+    },
+    "models/qsvc_config.pkl"
+)
 
 
     print("\nModel saved successfully!")
 
-    print(
-        "model/qsvc_model.pkl"
-    )
-
-    print(
-        "model/scaler.pkl"
-    )
-
-    print(
-        "model/config.pkl"
-    )
+print("models/qsvc_model.pkl")
+print("models/qsvc_scaler.pkl")
+print("models/qsvc_config.pkl")
 
 def load_model():
 
     model = joblib.load(
-        "model/qsvc_model.pkl"
+        "models/qsvc_model.pkl"
     )
 
     scaler = joblib.load(
-        "model/scaler.pkl"
+        "models/qsvc_scaler.pkl"
     )
 
     return model, scaler
