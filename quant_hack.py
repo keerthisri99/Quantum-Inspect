@@ -18,7 +18,7 @@ for file in os.listdir("dataset"):
         norm_img=gray_img/255.0
         mean=np.mean(gray_img)
         std=np.std(gray_img)
-        max=np.std(gray_img)
+        max=np.max(gray_img)
         min=np.min(gray_img)
         edges=cv2.Canny(gray_img,100,200)
         edge_count=np.count_nonzero(edges)
