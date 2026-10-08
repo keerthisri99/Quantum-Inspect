@@ -36,5 +36,14 @@ for file in os.listdir("dataset"):
             x.append(features)
             y.append(1)
         count=count+1
-    print(x)
-    print(y)
+X = np.array(x)
+Y = np.array(y)
+
+os.makedirs("data", exist_ok=True)
+
+np.save("data/X.npy", X)
+np.save("data/y.npy", Y)
+
+print("Feature extraction completed!")
+print("X shape:", X.shape)
+print("Y shape:", Y.shape)
